@@ -66,7 +66,7 @@ python jung_enhance.py note.jpg enhanced_note.jpg --handwriting
 - 运行成功后，程序会自动保存结果，并尝试弹出原图与增强图供对比（若环境支持 GUI，如本地 Windows 桌面）。
 
 ---
-
+仓库的example文件夹提供测试用例用于测试本算法。
 > © 本文基于 CSDN 博主「小天在线学理工」原创内容整理  
 > 原文链接：https://blog.csdn.net/sillybsillyb/article/details/156002897  
 > 遵循 CC 4.0 BY-SA 版权协议
