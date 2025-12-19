@@ -8,6 +8,8 @@
 本脚本实现了基于 Jung 注水法（Water-Filling）的文档图像增强算法，支持普通打印文档与手写笔记两种模式，并可选择保留原始色彩。整个流程完全在 CPU 上运行，适用于 Windows 笔记本等无 GPU 环境。
 
 ---
+本方法的阴影去除效果图：
+<img width="2010" height="1126" alt="zz" src="https://github.com/user-attachments/assets/a17fcde9-3807-40c9-9fb7-aed5b309959e" />
 
 ## ✅ 环境要求
 
