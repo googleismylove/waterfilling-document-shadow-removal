@@ -1,15 +1,16 @@
 
 
-```markdown
+
 [English](README.md) | 简体中文
 
 # 基于 Jung 注水法（Water-Filling）的文档图像增强工具
 
 本脚本实现了基于 Jung 注水法（Water-Filling）的文档图像增强算法，支持普通打印文档与手写笔记两种模式，并可选择保留原始色彩。整个流程完全在 CPU 上运行，适用于 Windows 笔记本等无 GPU 环境。
 
----
 本方法的阴影去除效果图：
 <img width="2010" height="1126" alt="zz" src="https://github.com/user-attachments/assets/a17fcde9-3807-40c9-9fb7-aed5b309959e" />
+---
+
 
 ## ✅ 环境要求
 
@@ -70,6 +71,7 @@ python jung_enhance.py note.jpg enhanced_note.jpg --handwriting
 ---
 仓库的example文件夹提供测试用例用于测试本算法。
 > © 本文基于 CSDN 博主「小天在线学理工」原创内容整理  
-> 原文链接：https://blog.csdn.net/sillybsillyb/article/details/156002897  
+> 原文链接：https://blog.csdn.net/sillybsillyb/article/details/156002897
+> 知乎链接：https://zhuanlan.zhihu.com/p/1985475972665987897
 > 遵循 CC 4.0 BY-SA 版权协议
 ```
