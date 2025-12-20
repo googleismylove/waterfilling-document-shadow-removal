@@ -204,7 +204,17 @@ def fix_contrast_fast_from_image(gray_image):
 
 
 # ==================== 主增强函数 ====================
-def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, handwriting=False):
+def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, handwriting=False, output_grey=False, only_jung=False):
+    """
+    默认 (keep_color=False): 
+        - 彩色图：Y 通道走完整灰度流程（含白边、后处理2等），再合成彩色（除非 output_grey=True）
+    
+    --color: 轻量模式，跳过白边/手写/后处理2
+    
+    --only: 仅执行 Jung 增强（水填充 + 精炼），直接输出
+    
+    --grey: 强制输出灰度图（即使输入是彩色）
+    """
     start_total = time.perf_counter()
 
     img = cv2.imread(image_path)
@@ -213,15 +223,19 @@ def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, h
 
     print(f"[INFO] 已加载图像: {img.shape[1]}x{img.shape[0]}")
 
-    is_color = len(img.shape) == 3 and img.shape[2] == 3
+    # 判断是否为彩色图
+    is_color_input = len(img.shape) == 3 and img.shape[2] == 3
 
-    if is_color:
+    if is_color_input:
         ycrcb = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
         y, cr, cb = cv2.split(ycrcb)
         gray_for_jung = y
+        has_color = True
     else:
         gray_for_jung = img
-        keep_color = False
+        has_color = False
+        keep_color = False  # 灰度图无法 keep_color
+        output_grey = True  # 输入就是灰度，自然输出灰度
 
     # === 第一步：Jung 算法增强亮度通道 ===
     t0 = time.perf_counter()
@@ -231,8 +245,32 @@ def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, h
     t2 = time.perf_counter()
     print(f"[Timing] 水填充: {t1 - t0:.3f}s | 精炼: {t2 - t1:.3f}s")
 
-    # 初始白边去除（仅灰度）
-    white_edge_time = 0.0
+    # >>>>>>>>>>>>>>>>>> 新增：--only 逻辑 <<<<<<<<<<<<<<<<<<
+    if only_jung:
+        print("[MODE] --only 模式：仅执行 Jung 增强，跳过后续处理")
+
+        # 决定最终输出是灰度还是彩色
+        if output_grey or not has_color:
+            result = enhanced_y
+            print("[OUTPUT] --only 模式输出灰度图像")
+        else:
+            # 合成彩色：用增强后的 Y + 原始 Cr, Cb
+            enhanced_ycrcb = cv2.merge([enhanced_y, cr, cb])
+            result = cv2.cvtColor(enhanced_ycrcb, cv2.COLOR_YCrCb2BGR)
+            print("[OUTPUT] --only 模式输出彩色图像（保留原色度）")
+
+        total_time = time.perf_counter() - start_total
+        print("\n" + "="*60)
+        print(f"[SUMMARY] 总耗时: {total_time:.3f} 秒 (--only 模式)")
+        print("="*60)
+        if output_path:
+            cv2.imwrite(output_path, result)
+            print(f"[INFO] 已保存至 {output_path}")
+        return result
+
+    # ==============================
+    # 分支 1: 默认模式 (keep_color=False) → 完整灰度流程
+    # ==============================
     if not keep_color:
         t_white_start = time.perf_counter()
         bg_color = get_background_color(enhanced_y)
@@ -240,62 +278,40 @@ def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, h
         t_white_end = time.perf_counter()
         white_edge_time = t_white_end - t_white_start
         print(f"[Timing] 初始白边去除: {white_edge_time:.3f}s (背景色={bg_color})")
-    else:
-        print("[SKIP] 彩色模式跳过初始白边去除")
 
-    # ====== 第一阶段：去噪 + 锐化 ======
-    t3 = time.perf_counter()
-    enhanced_y = nlm_denoise(enhanced_y, h=12)
-    t4 = time.perf_counter()
-    print(f"[Timing] 第一阶段 NLM 去噪: {t4 - t3:.3f}s")
+        t3 = time.perf_counter()
+        enhanced_y = nlm_denoise(enhanced_y, h=12)
+        t4 = time.perf_counter()
+        print(f"[Timing] 第一阶段 NLM 去噪: {t4 - t3:.3f}s")
+        enhanced_y = adaptive_sharpen(enhanced_y, amount=1.2)
+        t5 = time.perf_counter()
+        print(f"[Timing] 第一阶段锐化: {t5 - t4:.3f}s")
 
-    enhanced_y = adaptive_sharpen(enhanced_y, amount=1.2)
-    t5 = time.perf_counter()
-    print(f"[Timing] 第一阶段锐化: {t5 - t4:.3f}s")
+        t6 = time.perf_counter()
+        enhanced_y = nlm_denoise(enhanced_y, h=4)
+        t7 = time.perf_counter()
+        print(f"[Timing] 第二阶段 NLM 去噪: {t7 - t6:.3f}s")
+        enhanced_y = adaptive_sharpen(enhanced_y, amount=1.0)
+        t8 = time.perf_counter()
+        print(f"[Timing] 第二阶段锐化: {t8 - t7:.3f}s")
 
-    # ====== 第二阶段：轻量去噪 + 轻量锐化 ======
-    t6 = time.perf_counter()
-    enhanced_y = nlm_denoise(enhanced_y, h=4)
-    t7 = time.perf_counter()
-    print(f"[Timing] 第二阶段 NLM 去噪: {t7 - t6:.3f}s")
-
-    enhanced_y = adaptive_sharpen(enhanced_y, amount=1.0)
-    t8 = time.perf_counter()
-    print(f"[Timing] 第二阶段锐化: {t8 - t7:.3f}s")
-
-    # ====== 手写专用后处理 ======
-    handwriting_time = 0.0
-    if handwriting and not keep_color:
-        t11 = time.perf_counter()
-        enhanced_y = fix_contrast_fast_from_image(enhanced_y)
-        t12 = time.perf_counter()
-        handwriting_time = t12 - t11
-        print(f"[Timing] 手写后处理: {handwriting_time:.3f}s")
-    else:
-        if handwriting and keep_color:
-            print("[WARNING] 手写后处理在彩色模式下被跳过")
+        if handwriting:
+            t11 = time.perf_counter()
+            enhanced_y = fix_contrast_fast_from_image(enhanced_y)
+            t12 = time.perf_counter()
+            handwriting_time = t12 - t11
+            print(f"[Timing] 手写后处理: {handwriting_time:.3f}s")
         else:
             print("[SKIP] 手写后处理未启用")
 
-    # ====== 后处理2：上采样 + 秩滤波 + 对比度增强 ======
-    postproc2_time = 0.0
-    is_handwriting_mode = handwriting
-    if not keep_color:
         t13 = time.perf_counter()
         h_orig, w_orig = enhanced_y.shape
         scale = 3
-
-        # 上采样
         gray_up = cv2.resize(enhanced_y, (w_orig * scale, h_orig * scale), interpolation=cv2.INTER_CUBIC)
-
-        # 秩滤波
         filtered_up = rank_filter(gray_up, rank=2, size=3)
-
-        # 下采样回原始尺寸
         downsampled = cv2.resize(filtered_up, (w_orig, h_orig), interpolation=cv2.INTER_AREA)
 
-        # 非手写模式下增强对比度
-        if not is_handwriting_mode:
+        if not handwriting:
             enhanced_y = cv2.convertScaleAbs(downsampled, alpha=1.2, beta=20)
             print("[INFO] 应用了最终对比度/亮度增强")
         else:
@@ -305,40 +321,66 @@ def jung_enhance_paper_correct(image_path, output_path=None, keep_color=False, h
         t14 = time.perf_counter()
         postproc2_time = t14 - t13
         print(f"[Timing] 后处理2: {postproc2_time:.3f}s")
-    else:
-        print("[SKIP] 彩色模式跳过后处理2")
 
-    # 重建彩色图像
-    t15 = time.perf_counter()
-    if keep_color and is_color:
+    # ==============================
+    # 分支 2: --color 模式
+    # ==============================
+    else:
+        print("[MODE] --color 模式：仅执行核心增强（跳过白边、手写、后处理2）")
+        t3 = time.perf_counter()
+        enhanced_y = nlm_denoise(enhanced_y, h=12)
+        t4 = time.perf_counter()
+        print(f"[Timing] 第一阶段 NLM 去噪: {t4 - t3:.3f}s")
+        enhanced_y = adaptive_sharpen(enhanced_y, amount=1.2)
+        t5 = time.perf_counter()
+        print(f"[Timing] 第一阶段锐化: {t5 - t4:.3f}s")
+
+        t6 = time.perf_counter()
+        enhanced_y = nlm_denoise(enhanced_y, h=4)
+        t7 = time.perf_counter()
+        print(f"[Timing] 第二阶段 NLM 去噪: {t7 - t6:.3f}s")
+        enhanced_y = adaptive_sharpen(enhanced_y, amount=1.0)
+        t8 = time.perf_counter()
+        print(f"[Timing] 第二阶段锐化: {t8 - t7:.3f}s")
+
+    # ==============================
+    # 输出决定：是否合成彩色？
+    # ==============================
+    if output_grey or not has_color:
+        result = enhanced_y
+        print("[OUTPUT] 输出灰度图像")
+    else:
+        t15 = time.perf_counter()
         enhanced_ycrcb = cv2.merge([enhanced_y, cr, cb])
         result = cv2.cvtColor(enhanced_ycrcb, cv2.COLOR_YCrCb2BGR)
-    else:
-        result = enhanced_y
-    t16 = time.perf_counter()
-    color_recon_time = t16 - t15
+        t16 = time.perf_counter()
+        color_recon_time = t16 - t15
+        print("[OUTPUT] 输出彩色图像")
 
+    # ==============================
+    # 输出统计
+    # ==============================
     total_time = time.perf_counter() - start_total
     print("\n" + "="*60)
     print(f"[SUMMARY] 总耗时: {total_time:.3f} 秒")
     print(f"  - 水填充 + 精炼: {t2 - t0:.3f}s")
-    if not keep_color:
+    if not keep_color and not only_jung:
         print(f"  - 初始白边去除: {white_edge_time:.3f}s")
-    print(f"  - 第一阶段去噪/锐化: {t5 - t3:.3f}s")
-    print(f"  - 第二阶段去噪/锐化: {t8 - t6:.3f}s")
-    if handwriting and not keep_color:
-        print(f"  - 手写后处理: {handwriting_time:.3f}s")
-    if not keep_color:
+        print(f"  - 第一阶段去噪/锐化: {t5 - t3:.3f}s")
+        print(f"  - 第二阶段去噪/锐化: {t8 - t6:.3f}s")
+        if handwriting:
+            print(f"  - 手写后处理: {handwriting_time:.3f}s")
         print(f"  - 后处理2: {postproc2_time:.3f}s")
-    print(f"  - 彩色重建: {color_recon_time:.3f}s")
+    elif keep_color and not only_jung:
+        print(f"  - 轻量增强（两次NLM+sharpen）: {t8 - t3:.3f}s")
+    if has_color and not output_grey and not only_jung:
+        print(f"  - 彩色重建: {color_recon_time:.3f}s")
     print("="*60)
 
     if output_path:
         cv2.imwrite(output_path, result)
         print(f"[INFO] 已保存至 {output_path}")
     return result
-
-
 # ==================== Jung 核心函数 ====================
 
 def water_filling_luminance(gray_img, max_iter=2500, downsample_ratio=0.2, eta=0.2):
@@ -378,11 +420,13 @@ def refine_and_reconstruct(gray_img, shading_layer, max_iter=100, eta=0.2, brigh
 
 # ==================== 主程序入口 ====================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Jung 文档增强算法，支持手写模式")
+    parser = argparse.ArgumentParser(description="Jung 文档增强算法")
     parser.add_argument("input", help="输入图像路径")
     parser.add_argument("output", nargs='?', default="jung_output_correct.jpg", help="输出图像路径")
-    parser.add_argument("--color", action="store_true", help="保留彩色（禁用白边去除、手写模式和后处理2）")
-    parser.add_argument("--handwriting", action="store_true", help="启用手写专用后处理（仅灰度）")
+    parser.add_argument("--color", action="store_true", help="轻量彩色模式：仅两次NLM+锐化，跳过白边/手写/后处理2")
+    parser.add_argument("--handwriting", action="store_true", help="启用手写后处理（仅在默认模式下有效）")
+    parser.add_argument("--grey", action="store_true", help="强制输出灰度图像（即使输入是彩色）")
+    parser.add_argument("--only", action="store_true", help="仅执行 Jung 核心增强，跳过所有后处理")
 
     args = parser.parse_args()
 
@@ -390,11 +434,13 @@ if __name__ == "__main__":
         args.input,
         args.output,
         keep_color=args.color,
-        handwriting=args.handwriting
+        handwriting=args.handwriting,
+        output_grey=args.grey,
+        only_jung=args.only
     )
 
     try:
-        orig = cv2.imread(args.input, cv2.IMREAD_COLOR if args.color else cv2.IMREAD_GRAYSCALE)
+        orig = cv2.imread(args.input, cv2.IMREAD_COLOR if not args.grey else cv2.IMREAD_GRAYSCALE)
         cv2.imshow("Original", orig)
         cv2.imshow("Jung Enhanced", result)
         cv2.waitKey(0)
